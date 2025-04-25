@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import torch.optim as optim
 import joblib
 
-SEQ_LEN = 5 
+SEQ_LEN = 20 
 CSV_PATH = 'WaterLevelTrace.csv'
 MODEL_PATH = 'water_level_lstm.pth'
 SCALER_PATH = 'scaler.save'
@@ -37,7 +37,7 @@ class WaterLevelDataset(Dataset):
 
 
 class WaterLevelLSTM(nn.Module):
-    def __init__(self, input_size=1, hidden_size=64, num_layers=1):
+    def __init__(self, input_size=1, hidden_size=16, num_layers=1):
         super(WaterLevelLSTM, self).__init__()
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
                             num_layers=num_layers, batch_first=True)
@@ -138,7 +138,7 @@ class WaterLevelLSTM(nn.Module):
 
 model = WaterLevelLSTM()
 
-#model.fit_model(epochs=30)
+model.fit_model(epochs=30)
 
 model.load_model()
 
