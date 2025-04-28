@@ -71,12 +71,33 @@ def load_dataset(file_path):
 
     return x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories
 
-def create_sequences():
+def create_next_state_sequences(x1_trajectories, x2_trajectories, x3_trajectories, n):
     inputs = []
     targets = []
+
+    for x1_traj, x2_traj, x3_traj in zip(x1_trajectories, x2_trajectories, x3_trajectories):
+        trajectory_length = len(x1_traj)
+        for i in range(trajectory_length - n):
+            # Input: window of size n
+            window_x1 = x1_traj[i:i+n]
+            window_x2 = x2_traj[i:i+n]
+            window_x3 = x3_traj[i:i+n]
+
+            # Combine x1, x2, x3 into a feature vector for each time step
+            sequence = [[x1, x2, x3] for x1, x2, x3 in zip(window_x1, window_x2, window_x3)]
+            inputs.append(sequence)
+
+            # Target: next state after the window
+            next_state = [x1_traj[i+n], x2_traj[i+n], x3_traj[i+n]]
+            targets.append(next_state)
+
+    return inputs, targets
 
 
 file_path = "state_trajectories.csv"
 x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories = load_dataset(file_path)
 
 plot_random_trajectory(x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories)
+
+sequence_length = 10
+inputs, targets = create_next_state_sequences(x1_trajectories, x2_trajectories, x3_trajectories, sequence_length)
