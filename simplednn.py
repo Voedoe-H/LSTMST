@@ -1,7 +1,7 @@
 import pandas as pd
 import torch
 import torch.nn as nn
-
+import os
 
 class PredictorDNN(nn.Module):
 
@@ -107,9 +107,9 @@ def create_labels(normalized_prices, window_size=30):
         labels.append(label)
     return torch.tensor(labels, dtype=torch.float32).unsqueeze(1)  #
 
-def train_model(model, X, y, epochs=20, batch_size=64, lr=0.001):
+def train_model(model, X, y, epochs=20, batch_size=64, lr=0.001, model_path="predictor_dnn.pt"):
     """
-    Trains the given model on the provided dataset.
+    Trains the given model or loads a pre-trained model if it exists.
 
     Parameters:
         model (nn.Module): The model to train
@@ -118,12 +118,22 @@ def train_model(model, X, y, epochs=20, batch_size=64, lr=0.001):
         epochs (int): Number of training epochs
         batch_size (int): Batch size
         lr (float): Learning rate
+        model_path (str): Path to save/load the model
     """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+
+    # Load existing model if available
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print(f"Loaded model from {model_path} and will continue training.")
+
+    # Prepare data
+    X, y = X.to(device), y.to(device)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     model.train()
-
     for epoch in range(epochs):
         permutation = torch.randperm(X.size(0))
         epoch_loss = 0.0
@@ -142,6 +152,12 @@ def train_model(model, X, y, epochs=20, batch_size=64, lr=0.001):
 
         avg_loss = epoch_loss / (X.size(0) / batch_size)
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    # Save trained model
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved to {model_path}")
+
+    return model
 
 if __name__ == "__main__":
     # Load and normalize
