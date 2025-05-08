@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import torch.optim as optim
 import joblib
 
-SEQ_LEN = 20 
+SEQ_LEN = 125
 CSV_PATH = 'WaterLevelTrace.csv'
 MODEL_PATH = 'water_level_lstm.pth'
 SCALER_PATH = 'scaler.save'
@@ -37,7 +37,7 @@ class WaterLevelDataset(Dataset):
 
 
 class WaterLevelLSTM(nn.Module):
-    def __init__(self, input_size=1, hidden_size=16, num_layers=1):
+    def __init__(self, input_size=1, hidden_size=64, num_layers=4):
         super(WaterLevelLSTM, self).__init__()
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
                             num_layers=num_layers, batch_first=True)
@@ -49,7 +49,8 @@ class WaterLevelLSTM(nn.Module):
         output = self.fc(last_hidden)
         return output
 
-    def fit_model(self, csv_path=CSV_PATH, seq_len=SEQ_LEN, epochs=10, batch_size=32, save=True, val_split=0.2):
+    def fit_model(self, csv_path=CSV_PATH, seq_len=SEQ_LEN, epochs=30, batch_size=32, save=True, val_split=0.2, patience=5):
+        
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(device)
 
@@ -75,6 +76,9 @@ class WaterLevelLSTM(nn.Module):
 
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.parameters(), lr=0.0005)
+
+        best_val_loss = float('inf')
+        epochs_without_improvement = 0
 
         for epoch in range(epochs):
             self.train()
@@ -112,9 +116,20 @@ class WaterLevelLSTM(nn.Module):
 
             print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.6f}, Val Loss: {avg_val_loss:.6f}")
 
-        if save:
-            torch.save(self.state_dict(), MODEL_PATH)
-            print(f"Model saved to {MODEL_PATH}")
+            # Early stopping check
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                epochs_without_improvement = 0
+                # Optionally save the best model during training
+                if save:
+                    torch.save(self.state_dict(), MODEL_PATH)
+                    print(f"Best model saved to {MODEL_PATH}")
+            else:
+                epochs_without_improvement += 1
+
+            if epochs_without_improvement >= patience:
+                print(f"Early stopping triggered. Stopping training after {epoch+1} epochs.")
+                break
 
     def load_model(self, model_path=MODEL_PATH):
         self.load_state_dict(torch.load(model_path))
@@ -136,10 +151,10 @@ class WaterLevelLSTM(nn.Module):
         
         return prediction.cpu().numpy().flatten()[0]
 
+
+# --- Test Phase ---
 model = WaterLevelLSTM()
-
 model.fit_model(epochs=30)
-
 model.load_model()
 
 scaler = joblib.load(SCALER_PATH)
@@ -159,18 +174,46 @@ for i in range(len(test_X)):
     true_value = test_y[i]
     
     predicted_value = model.predict(input_seq)
-    # TODO this shit doesnt work correctly yet
+    
+    # Debug: Check scaled predictions and true values
+    #print(f"Predicted (scaled): {predicted_value}, True (scaled): {true_value}")
+    
+    # Ensure predicted_value is reshaped correctly for inverse_transform
     predicted_value_denormalized = scaler.inverse_transform(np.array([[predicted_value]]).reshape(1, -1))[0][0]
     
+    # True value also needs to be reshaped for inverse_transform
     true_value_denormalized = scaler.inverse_transform(np.array([[true_value]]).reshape(1, -1))[0][0]
     
     predicted_values.append(predicted_value_denormalized)
     actual_values.append(true_value_denormalized)
 
+# Plotting the results
 plt.figure(figsize=(10,6))
 plt.plot(np.arange(len(predicted_values)), predicted_values, label='Predicted', color='r')
 plt.plot(np.arange(len(actual_values)), actual_values, label='Actual', color='b')
 plt.title('Predicted vs Actual Water Levels (Denormalized)')
+plt.xlabel('Time Step')
+plt.ylabel('Water Level')
+plt.legend()
+plt.show()
+
+# Diagnostic Plot: Check both scaled and denormalized predictions vs. true values
+plt.figure(figsize=(10, 6))
+
+# Plot the scaled predictions and true values
+plt.plot(np.arange(len(predicted_values)), predicted_values, label='Predicted (Scaled)', color='r', alpha=0.6)
+plt.plot(np.arange(len(actual_values)), actual_values, label='True (Scaled)', color='b', alpha=0.6)
+
+# Denormalize the predicted and true values
+denormalized_pred = scaler.inverse_transform(np.array(predicted_values).reshape(-1, 1)).flatten()
+denormalized_true = scaler.inverse_transform(np.array(actual_values).reshape(-1, 1)).flatten()
+
+# Plot the denormalized predictions and true values
+plt.plot(np.arange(len(denormalized_pred)), denormalized_pred, label='Predicted (Denormalized)', color='orange', linestyle='--')
+plt.plot(np.arange(len(denormalized_true)), denormalized_true, label='True (Denormalized)', color='green', linestyle='--')
+
+# Labels and title
+plt.title('Scaled and Denormalized Predictions vs. True Values')
 plt.xlabel('Time Step')
 plt.ylabel('Water Level')
 plt.legend()

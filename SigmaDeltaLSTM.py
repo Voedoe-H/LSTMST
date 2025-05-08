@@ -5,7 +5,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset, DataLoader
+import torch
+import torch.nn as nn
+from torch.optim import Adam
+import torch.nn.functional as F
 
 def plot_random_trajectory(x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories):
     trajectory_id = random.choice(range(len(x1_trajectories)))
@@ -71,12 +76,91 @@ def load_dataset(file_path):
 
     return x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories
 
-def create_sequences():
+def create_next_state_sequences(x1_trajectories, x2_trajectories, x3_trajectories, n):
     inputs = []
     targets = []
 
+    for x1_traj, x2_traj, x3_traj in zip(x1_trajectories, x2_trajectories, x3_trajectories):
+        trajectory_length = len(x1_traj)
+        for i in range(trajectory_length - n):
+            # Input: window of size n
+            window_x1 = x1_traj[i:i+n]
+            window_x2 = x2_traj[i:i+n]
+            window_x3 = x3_traj[i:i+n]
+
+            # Combine x1, x2, x3 into a feature vector for each time step
+            sequence = [[x1, x2, x3] for x1, x2, x3 in zip(window_x1, window_x2, window_x3)]
+            inputs.append(sequence)
+
+            # Target: next state after the window
+            next_state = [x1_traj[i+n], x2_traj[i+n], x3_traj[i+n]]
+            targets.append(next_state)
+
+    return inputs, targets
+
+class SigmaDetlaDataset(Dataset):
+    """ """
+    def __init__(self,X,Y):
+        super().__init__()
+        self.X = X
+        self.Y = Y
+    
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, index):
+        return self.X[index], self.Y[index]
+
+
+class SigmaDeltaLSTM(nn.Module):
+    """ """
+    def __init__(self,HIDDEN_SIZE,LAYER_NUM):
+        super(SigmaDeltaLSTM,self).__init__()
+        self.lstm = nn.LSTM(input_size = 3, hidden_size=HIDDEN_SIZE, num_layers=LAYER_NUM)
+        self.fc = nn.Linear(HIDDEN_SIZE , 3)
+
+    def forward(self,x):
+        out, (hn, cn) = self.lstm(x)    
+        last_hidden = hn[-1]
+        output = self.fc(last_hidden)
+        
+        return output
+
+    def fit_model(self,csv_path,seq_len,epochs=10,batch_size=32, save=True, val_split = 0.2, lr = 0.001):
+        device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
+        print(f"Device Chosen: {device}")
+        self.to(device)
+        
+        x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories = load_dataset(file_path)
+        inputs, targets = create_next_state_sequences(x1_trajectories, x2_trajectories, x3_trajectories, seq_len)
+
+        combined_inputs = np.array([[[x1, x2, x3] for x1, x2, x3 in zip(traj_x1, traj_x2, traj_x3)] for traj_x1, traj_x2, traj_x3 in zip(x1_trajectories, x2_trajectories, x3_trajectories)])
+        combined_inputs_flat = combined_inputs.reshape(-1, 3)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        normalized_inputs = scaler.fit_transform(combined_inputs_flat)
+        normalized_inputs = normalized_inputs.reshape(combined_inputs.shape)
+        targets_flat = np.array(targets)
+        normalized_targets = scaler.fit_transform(targets_flat)
+
+        X_train, X_val, Y_train, Y_val = train_test_split(normalized_inputs, normalized_targets, test_size=val_split, random_state=69)
+
+        train_dataset = SigmaDetlaDataset(X_train, Y_train)
+        val_dataset = SigmaDetlaDataset(X_val, Y_val)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+        optimizer = Adam(self.parameters(),lr)
+        criterion = nn.MSELoss()
+
+        
+
+
+SEQUENCE_LENGTH = 5
+HIDDEN_SIZE = 3
+LAYER_NUM = 1
+LR = 0.001
 
 file_path = "state_trajectories.csv"
-x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories = load_dataset(file_path)
-
-plot_random_trajectory(x1_trajectories, x2_trajectories, x3_trajectories, d_trajectories)
+model = SigmaDeltaLSTM(HIDDEN_SIZE=HIDDEN_SIZE,LAYER_NUM=LAYER_NUM)
+model.fit_model(file_path,SEQUENCE_LENGTH,lr=LR)
