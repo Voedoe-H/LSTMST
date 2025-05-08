@@ -88,19 +88,70 @@ def create_windows(normalized_prices, window_size=30):
         X.append(window)
     return torch.tensor(X, dtype=torch.float32)
 
+def create_labels(normalized_prices, window_size=30):
+    """
+    Creates binary labels indicating if the price went up the next day.
 
-# Load and normalize
-df = load_csv_to_dataframe("AAPL.USUSD_Candlestick_1_D_BID_01.01.2020-30.04.2025.csv")
-normalized = normalize_data(df)
+    Parameters:
+        normalized_prices (np.ndarray): Normalized price data
+        window_size (int): Length of input window
 
-# Create model input windows
-X = create_windows(normalized, window_size=30)  # shape: [samples, 30]
+    Returns:
+        torch.Tensor: Labels [num_samples, 1]
+    """
+    labels = []
+    for i in range(window_size, len(normalized_prices)):
+        today = normalized_prices[i - 1]
+        tomorrow = normalized_prices[i]
+        label = 1.0 if tomorrow > today else 0.0
+        labels.append(label)
+    return torch.tensor(labels, dtype=torch.float32).unsqueeze(1)  #
 
-# Initialize model
-model = PredictorDNN(input_size=30)
-model.eval()
+def train_model(model, X, y, epochs=20, batch_size=64, lr=0.001):
+    """
+    Trains the given model on the provided dataset.
 
-# Forward pass on first 5 windows
-with torch.no_grad():
-    output = model(X[:5])
-    print("Model output (up probability):", output.squeeze())
+    Parameters:
+        model (nn.Module): The model to train
+        X (Tensor): Input windows of shape [N, window_size]
+        y (Tensor): Target labels of shape [N, 1]
+        epochs (int): Number of training epochs
+        batch_size (int): Batch size
+        lr (float): Learning rate
+    """
+    criterion = nn.BCELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    model.train()
+
+    for epoch in range(epochs):
+        permutation = torch.randperm(X.size(0))
+        epoch_loss = 0.0
+
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i + batch_size]
+            batch_X, batch_y = X[indices], y[indices]
+
+            optimizer.zero_grad()
+            outputs = model(batch_X)
+            loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+
+            epoch_loss += loss.item()
+
+        avg_loss = epoch_loss / (X.size(0) / batch_size)
+        print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+
+if __name__ == "__main__":
+    # Load and normalize
+    df = load_csv_to_dataframe("AAPL.USUSD_Candlestick_1_D_BID_01.01.2020-30.04.2025.csv")
+    normalized = normalize_data(df)
+
+    # Create input features and labels
+    X = create_windows(normalized, window_size=30)              # [N, 30]
+    y = create_labels(normalized, window_size=30)               # [N, 1]
+
+    # Initialize and train model
+    model = PredictorDNN(input_size=30)
+    train_model(model, X, y, epochs=1)
